@@ -7,13 +7,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"unicode/utf8"
 )
 
-var help = flag.Bool("help", false, "Show help")
 var bytesCount string
 var lineCount string
 var wordCount string
@@ -31,23 +32,12 @@ DESCRIPTION
 `
 
 // fileBytes returns the count of bytes in a file.
-func fileBytes() (int, error) {
-	content, err := os.ReadFile(bytesCount) // returns a byte array of content
-	if err != nil {
-		return 0, err
-	}
-
-	return len(content), nil
+func fileBytes(content []byte) int {
+	return len(content)
 }
 
 // fileLines returns the count of lines in a file.
-func fileLines() (int, error) {
-	content, err := os.ReadFile(lineCount) // returns a byte array of content
-
-	if err != nil {
-		return 0, err
-	}
-
+func fileLines(content []byte) int {
 	var lc int
 	for _, c := range content {
 		if c == byte('\n') {
@@ -55,17 +45,11 @@ func fileLines() (int, error) {
 		}
 	}
 
-	return lc, nil
+	return lc
 }
 
 // fileWords returns the count of words in a file.
-func fileWords() (int, error) {
-	content, err := os.ReadFile(wordCount) // returns a byte array of content
-
-	if err != nil {
-		return 0, err
-	}
-
+func fileWords(content []byte) int {
 	var wc int
 	bc := len(content)
 	for i := 0; i < bc-1; i++ {
@@ -85,18 +69,12 @@ func fileWords() (int, error) {
 		wc++
 	}
 
-	return wc, nil
+	return wc
 }
 
 // fileCharacters returns the count of characters in a file.
-func fileCharacters() (int, error) {
+func fileCharacters(content []byte) int {
 	// utf8.RuneCountInString(characterCount) is used to count runes (characters) in a string.
-	content, err := os.ReadFile(characterCount) // returns a byte array of content
-
-	if err != nil {
-		return 0, err
-	}
-
 	runeSlice := make([]rune, 0)
 	for len(content) > 0 {
 		r, size := utf8.DecodeRune(content)
@@ -104,46 +82,62 @@ func fileCharacters() (int, error) {
 		content = content[size:]
 	}
 
-	return len(runeSlice), nil
-}
-
-// isFlagPassed determines if a particular flag was passed to the program.
-func isFlagPassed(name string) bool {
-	found := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			found = true
-		}
-	})
-	return found
+	return len(runeSlice)
 }
 
 func main() {
 	// TODO: The file is assumed to be in same directory.
 	flag.StringVar(&bytesCount, "c", "", "File name to be parsed for bytes count")
-	flag.StringVar(&lineCount, "l", "ddd", "File name to be parsed for line count")
+	flag.StringVar(&lineCount, "l", "", "File name to be parsed for line count")
 	flag.StringVar(&wordCount, "w", "", "File name to be parsed for word count")
 	flag.StringVar(&characterCount, "m", "", "File name to be parsed for character count")
-	flag.Parse()
 
-	// if !isFlagPassed("l") {
-	// 	fmt.Println("Yess")
-	// }
+	// Set flag error handling mode to ContinueOnError
+	// TODO(sighthon): Not print the error on invalid input
+	flag.CommandLine.Init(os.Args[0], flag.ContinueOnError)
+	if err := flag.CommandLine.Parse(os.Args[1:]); err != nil {
+		// If input is available from the pipe, read it
+		stat, _ := os.Stdin.Stat()
+		var content string
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			scanner := bufio.NewScanner(os.Stdin)
+			// Scan each line and concatenate them into a single string
+			for scanner.Scan() {
+				line := scanner.Text()
+				content += line + "\n" // Add newline to preserve line breaks
+			}
+		}
 
-	// // Usage demo
-	// if *help {
-	// 	flag.Usage()
-	// 	os.Exit(0)
-	// }
+		// If flag was provided but flag value wasn't, use the content from string
+		// TODO(sighthon): Fix the check. The nil check uses the default value.
+		var contentLen int
+		if strings.Contains(err.Error(), "-c") {
+			contentLen = fileBytes([]byte(content))
+		} else if strings.Contains(err.Error(), "-l") {
+			contentLen = fileLines([]byte(content))
+		} else if strings.Contains(err.Error(), "-w") {
+			contentLen = fileWords([]byte(content))
+		} else if strings.Contains(err.Error(), "-m") {
+			contentLen = fileCharacters([]byte(content))
+		}
+
+		fmt.Printf("%d \n", contentLen)
+		return
+	}
+
+	///////////
+	// File parsing beyond this point
+	//////////
 
 	// If number of bytes are requested.
 	if bytesCount != "" {
 		// bytes in the file
-		contentLen, err := fileBytes()
+		content, err := os.ReadFile(bytesCount) // returns a byte array of content
 		if err != nil {
 			fmt.Printf("Error while processing file %s - %s\n", bytesCount, err)
 			return
 		}
+		contentLen := fileBytes(content)
 		fmt.Printf("%d %s\n", contentLen, bytesCount)
 		return
 	}
@@ -151,11 +145,12 @@ func main() {
 	// If number of lines are requested.
 	if lineCount != "" {
 		// lines in the file
-		contentLen, err := fileLines()
+		content, err := os.ReadFile(lineCount) // returns a byte array of content
 		if err != nil {
 			fmt.Printf("Error while processing file %s - %s\n", lineCount, err)
 			return
 		}
+		contentLen := fileLines(content)
 		fmt.Printf("%d %s\n", contentLen, lineCount)
 		return
 	}
@@ -163,11 +158,12 @@ func main() {
 	// If number of words are requested.
 	if wordCount != "" {
 		// words in the file
-		contentLen, err := fileWords()
+		content, err := os.ReadFile(wordCount) // returns a byte array of content
 		if err != nil {
 			fmt.Printf("Error while processing file %s - %s\n", wordCount, err)
 			return
 		}
+		contentLen := fileWords(content)
 		fmt.Printf("%d %s\n", contentLen, wordCount)
 		return
 	}
@@ -175,38 +171,30 @@ func main() {
 	// If number of characters are requested.
 	if characterCount != "" {
 		// characters in the file
-		contentLen, err := fileCharacters()
+		content, err := os.ReadFile(characterCount) // returns a byte array of content
 		if err != nil {
 			fmt.Printf("Error while processing file %s - %s\n", characterCount, err)
 			return
 		}
+		contentLen := fileCharacters(content)
 		fmt.Printf("%d %s\n", contentLen, characterCount)
 		return
 	}
 
-	// If no flag was provided, use the second argument as filename
+	// If no flag value was provided, use the second argument as filename
 	args := os.Args[1:]
 	if len(args) > 0 {
 		lastArg := args[len(args)-1]
-		bytesCount = lastArg
-		lineCount = lastArg
-		wordCount = lastArg
+		content, err := os.ReadFile(lastArg) // returns a byte array of content
+		if err != nil {
+			fmt.Printf("Error while processing file %s - %s\n", lastArg, err)
+			return
+		}
 
-		a1, err := fileBytes()
-		if err != nil {
-			fmt.Printf("Error while processing file %s - %s\n", bytesCount, err)
-			return
-		}
-		a2, err := fileLines()
-		if err != nil {
-			fmt.Printf("Error while processing file %s - %s\n", lineCount, err)
-			return
-		}
-		a3, err := fileWords()
-		if err != nil {
-			fmt.Printf("Error while processing file %s - %s\n", wordCount, err)
-			return
-		}
+		a1 := fileBytes(content)
+		a2 := fileLines(content)
+		a3 := fileWords(content)
+
 		fmt.Printf("%d %d %d %s\n", a2, a3, a1, lastArg)
 	} else {
 		fmt.Println(usage)
